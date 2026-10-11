@@ -12,7 +12,7 @@ import re
 config = {
     "file_to_read": "data/recent_match_urls.csv",  # ".../.../example.csv" (file to read from, e.g. urls)
     "savefile_location": "data/recent_match_data.csv",  # ".../.../example.csv" (file that will get created/updated when finished)
-    "match_amount": 20,  # -1 = all - Note: This will probably take a REALLY long time, depending on url amount
+    "match_amount": 10,  # -1 = all - Note: This will probably take a REALLY long time, depending on url amount
     "headless": True,  # hide the browser
     "screen": Screen(max_width=1920, max_height=1080),
     "screen_amount": 1,  # only matters if headless = False
@@ -20,9 +20,9 @@ config = {
     "session_timeout": 1,  # timeout between sessions ([0.8, 1.2] also possible for a random timeout in a range)
     "use_proxy": False,  # use proxy
     "use_proxy_once": False,  # enable this to use a different proxy for each session (if you have enough proxies)
-    "proxy_location": ".../.../proxies.txt",  # location of the proxy list (format: server:port:username:password), 1 every line
-    "user_agents_location": ".../.../user_agents.json",  # location of the user agents list # refer to the readme for more info
-    "cookie_location": ".../.../autologin_cookie.json",  # location of the cookies incl. autologin
+    "proxy_location": "data/proxies.txt",  # location of the proxy list (format: server:port:username:password), 1 every line
+    "user_agents_location": "data/user_agents.json",  # location of the user agents list # refer to the readme for more info
+    "cookie_location": "data/autologin_cookie.json",  # location of the cookies incl. autologin
 }
 
 
@@ -235,6 +235,16 @@ def get_maps_info(soup, team_1, team_2):
 
     return maps_list
 
+def get_download_url(soup):
+    streams = soup.select_one("div.streams")
+    if streams:
+        download_url = streams.find("a")
+        if download_url:
+            full_url = f"https://www.hltv.org{download_url['data-demo-link']}"
+            # full_url = download_url
+            return full_url
+    return "N/A"
+
 
 async def scrape_match(session_id, headless, url_list):
     proxy = get_proxy() if config["use_proxy"] else None
@@ -262,6 +272,10 @@ async def scrape_match(session_id, headless, url_list):
         user_agent_entry = random.choice(user_agents)
         user_agent = user_agent_entry["ua"]
         await context.set_extra_http_headers({"User-Agent": user_agent})
+        status(
+            f"[!] [Session {session_id}] User agent chosen: {user_agent}",
+            bcolors.WARNING
+        )
 
         # Auto-login & add necessary cookies
         with open(config["cookie_location"], "r") as f:
@@ -275,7 +289,15 @@ async def scrape_match(session_id, headless, url_list):
                 start_time = time.perf_counter()
 
                 # Get HTML
-                await page.goto(url)
+                await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=30_000)
+                except Exception as e:
+                    status(
+                        f"[-] Session {session_id}: Exception - {e}",
+                        bcolors.FAIL,
+                    )
+                    break
                 html = await page.inner_html("div.colCon")
                 soup = BeautifulSoup(html, "html.parser")
 
@@ -289,6 +311,7 @@ async def scrape_match(session_id, headless, url_list):
                 event = get_event(soup)
                 mode = get_mode(soup)
                 maps = get_maps_info(soup, team_1, team_2)
+                download_url = get_download_url(soup)
 
                 match_info = {
                     # "match_url": url,
@@ -302,6 +325,7 @@ async def scrape_match(session_id, headless, url_list):
                     "event": event,
                     "mode": mode,
                     "maps": maps,
+                    "download_url": download_url,
                 }
 
                 """ maps format (not configurable here):

@@ -3,3 +3,6 @@ browserforge==1.2.3
 camoufox==0.4.11
 pandas==2.3.0
 python_dateutil==2.9.0.post0
+
+# added manually
+camoufox[geoip]

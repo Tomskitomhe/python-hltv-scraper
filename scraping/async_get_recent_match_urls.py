@@ -19,9 +19,9 @@ config = {
     "session_timeout": 1,  # timeout between sessions ([0.8, 1.2] also possible for a random timeout in a range)
     "use_proxy": False,  # use proxy
     "use_proxy_once": False,  # enable this to use a different proxy for each session (if you have enough proxies)
-    "proxy_location": ".../.../proxies.txt",  # location of the proxy list (format: server:port:username:password), 1 every line
-    "user_agents_location": ".../.../user_agents.json",  # location of the user agents list # refer to the readme for more info
-    "cookie_location": ".../.../autologin_cookie.json",  # location of the cookies incl. autologin
+    "proxy_location": "data/proxies.txt",  # location of the proxy list (format: server:port:username:password), 1 every line
+    "user_agents_location": "data/user_agents.json",  # location of the user agents list # refer to the readme for more info
+    "cookie_location": "data/autologin_cookie.json",  # location of the cookies incl. autologin
 }
 
 
@@ -95,6 +95,11 @@ async def scrape_match_urls(session_id, offsets, headless, url=recent_matches_ur
         user_agent = user_agent_entry["ua"]
         await context.set_extra_http_headers({"User-Agent": user_agent})
 
+        status(
+            f"[!] [Session {session_id}] User agent chosen: {user_agent}",
+            bcolors.WARNING
+        )
+
         # Auto-login & add necessary cookies
         with open(config["cookie_location"], "r") as f:
             cookies = json.load(f)
@@ -107,7 +112,16 @@ async def scrape_match_urls(session_id, offsets, headless, url=recent_matches_ur
                 start_time = time.perf_counter()
 
                 offset_url = f"{url}?offset={offset}"
-                await page.goto(offset_url)
+                await page.goto(offset_url, wait_until="domcontentloaded", timeout=30_000)
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=30_000)
+                except Exception as e:
+                    status(
+                        f"[-] Session {session_id}: Exception - {e}",
+                        bcolors.FAIL,
+                    )
+                    break
+
                 html = await page.inner_html("div.results")
                 soup = BeautifulSoup(html, "html.parser")
 

@@ -12,12 +12,12 @@ import re
 config = {
     "file_to_read": "data/recent_match_urls.csv",  # ".../.../example.csv" (file to read from, e.g. urls)
     "savefile_location": "data/recent_match_data.csv",  # ".../.../example.csv" (file that will get created/updated when finished)
-    "match_amount": 10,  # -1 = all - Note: This will probably take a REALLY long time, depending on url amount
+    "match_amount": 12,  # -1 = all - Note: This will probably take a REALLY long time, depending on url amount
     "headless": True,  # hide the browser
     "screen": Screen(max_width=1920, max_height=1080),
     "screen_amount": 1,  # only matters if headless = False
-    "session_amount": 2,  # amount of parallel sessions (you will get rate limited if you set this too high)
-    "session_timeout": 1,  # timeout between sessions ([0.8, 1.2] also possible for a random timeout in a range)
+    "session_amount": 4,  # amount of parallel sessions (you will get rate limited if you set this too high)
+    "session_timeout": [1.5, 2.5],  # timeout between sessions ([0.8, 1.2] also possible for a random timeout in a range)
     "use_proxy": False,  # use proxy
     "use_proxy_once": False,  # enable this to use a different proxy for each session (if you have enough proxies)
     "proxy_location": "data/proxies.txt",  # location of the proxy list (format: server:port:username:password), 1 every line
@@ -253,6 +253,8 @@ async def scrape_match(session_id, headless, url_list):
         screen=config["screen"],
         geoip=True,
         proxy=proxy,
+        os=["windows", "macos"],
+        humanize=True,
     ) as browser:
         context = await browser.new_context()
         if config["use_proxy"]:
@@ -266,16 +268,6 @@ async def scrape_match(session_id, headless, url_list):
                 bcolors.OKCYAN,
             )
 
-        # User-Agent rotation (https://www.useragents.me/#most-common-desktop-useragents-json-csv)
-        with open(config["user_agents_location"], "r") as f:
-            user_agents = json.load(f)
-        user_agent_entry = random.choice(user_agents)
-        user_agent = user_agent_entry["ua"]
-        await context.set_extra_http_headers({"User-Agent": user_agent})
-        status(
-            f"[!] [Session {session_id}] User agent chosen: {user_agent}",
-            bcolors.WARNING
-        )
 
         # Auto-login & add necessary cookies
         with open(config["cookie_location"], "r") as f:
@@ -289,15 +281,22 @@ async def scrape_match(session_id, headless, url_list):
                 start_time = time.perf_counter()
 
                 # Get HTML
-                await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+                response = await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+                status(
+                    f"[!] [Session {session_id}] HTTP status - {response.status if response else "None"}",
+                    bcolors.WARNING
+                )
+                
                 try:
-                    await page.wait_for_load_state("networkidle", timeout=30_000)
+                    await page.wait_for_selector("div.colCon", state="attached", timeout=30_000)
                 except Exception as e:
                     status(
-                        f"[-] Session {session_id}: Exception - {e}",
-                        bcolors.FAIL,
+                        f"[!] [Session {session_id}] Title - {await page.title()}",
+                        bcolors.WARNING
                     )
-                    break
+                    await page.screenshot(path=f"debug/session-{session_id}.png", full_page=True, timeout=10_000)
+                    raise
+                
                 html = await page.inner_html("div.colCon")
                 soup = BeautifulSoup(html, "html.parser")
 

@@ -11,11 +11,11 @@ import math
 
 config = {
     "savefile_location": "data/recent_match_urls.csv",  # ".../.../example.csv" (file that will get created/updated when finished)
-    "url_amount": 5000,  # amount of urls to scrape, rounded to next 100
-    "headless": True,  # hide browser
+    "url_amount": 2000,  # amount of urls to scrape, rounded to next 100
+    "headless": "virtual",  # hide browser
     "screen": Screen(max_width=1920, max_height=1080),
-    "screen_amount": 1,  # only matters if headless = False
-    "session_amount": 2,  # amount of parallel sessions (you will get rate limited if you set this too high)
+    "screen_amount": 4,  # only matters if headless = False
+    "session_amount": 4,  # amount of parallel sessions (you will get rate limited if you set this too high)
     "session_timeout": 1,  # timeout between sessions ([0.8, 1.2] also possible for a random timeout in a range)
     "use_proxy": False,  # use proxy
     "use_proxy_once": False,  # enable this to use a different proxy for each session (if you have enough proxies)
@@ -75,6 +75,8 @@ async def scrape_match_urls(session_id, offsets, headless, url=recent_matches_ur
         screen=config["screen"],
         geoip=True,
         proxy=proxy,
+        os=["windows", "macos"],
+        humanize=True,
     ) as browser:
         context = await browser.new_context()
         if config["use_proxy"]:
@@ -88,17 +90,6 @@ async def scrape_match_urls(session_id, offsets, headless, url=recent_matches_ur
                 bcolors.OKCYAN,
             )
 
-        # User-Agent rotation (https://www.useragents.me/#most-common-desktop-useragents-json-csv)
-        with open(config["user_agents_location"], "r") as f:
-            user_agents = json.load(f)
-        user_agent_entry = random.choice(user_agents)
-        user_agent = user_agent_entry["ua"]
-        await context.set_extra_http_headers({"User-Agent": user_agent})
-
-        status(
-            f"[!] [Session {session_id}] User agent chosen: {user_agent}",
-            bcolors.WARNING
-        )
 
         # Auto-login & add necessary cookies
         with open(config["cookie_location"], "r") as f:
@@ -112,15 +103,22 @@ async def scrape_match_urls(session_id, offsets, headless, url=recent_matches_ur
                 start_time = time.perf_counter()
 
                 offset_url = f"{url}?offset={offset}"
-                await page.goto(offset_url, wait_until="domcontentloaded", timeout=30_000)
+                response = await page.goto(offset_url, wait_until="domcontentloaded", timeout=30_000)
+                if response.status != 200:
+                    status(
+                        f"[!] [Session {session_id}] HTTP status - {response.status if response else "None"}",
+                        bcolors.WARNING
+                    )
+
                 try:
-                    await page.wait_for_load_state("networkidle", timeout=30_000)
+                    await page.wait_for_selector("div.results", state="attached", timeout=30_000)
                 except Exception as e:
                     status(
-                        f"[-] Session {session_id}: Exception - {e}",
-                        bcolors.FAIL,
+                        f"[!] [Session {session_id}] Title - {await page.title()}",
+                        bcolors.WARNING
                     )
-                    break
+                    await page.screenshot(path=f"debug/session-{session_id}.png", full_page=True, timeout=10_000)
+                    raise
 
                 html = await page.inner_html("div.results")
                 soup = BeautifulSoup(html, "html.parser")
@@ -207,7 +205,7 @@ async def main():
     for i in range(config["session_amount"]):
 
         if not config["headless"]:
-            is_headless = False if i < config["screen_amount"] else True
+            is_headless = config["headless"] if i < config["screen_amount"] else True
         else:
             is_headless = True
 
